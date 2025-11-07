@@ -15,8 +15,13 @@ func NewK8sClient() (*kubernetes.Clientset, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		// Running locally → use kubeconfig
-		home, _ := os.UserHomeDir()
-		kubeconfig := filepath.Join(home, ".kube", "config")
+		// Check KUBECONFIG environment variable first (cross-platform)
+		kubeconfig := os.Getenv("KUBECONFIG")
+		if kubeconfig == "" {
+			// Default to ~/.kube/config (works on Windows, Linux, macOS)
+			home, _ := os.UserHomeDir()
+			kubeconfig = filepath.Join(home, ".kube", "config")
+		}
 		flag.Parse()
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
