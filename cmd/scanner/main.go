@@ -20,15 +20,17 @@ func main() {
 		exportOpt        string // csv,md,html,json  (comma-separated)
 		outdir           string // output directory for exported files
 		restartThreshold int    // threshold for restart count to be considered high severity
+		kubeconfig       string // path to kubeconfig file
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
 	flag.StringVar(&exportOpt, "export", "", "Export report file(s): csv,md,html,json (comma-separated)")
 	flag.StringVar(&outdir, "outdir", ".reports", "Directory to write exported reports")
 	flag.IntVar(&restartThreshold, "restart-threshold", 5, "Restart count threshold for high severity (default: 5)")
+	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
 	flag.Parse()
 
-	clientset, err := k8s.NewK8sClient()
+	clientset, err := k8s.NewK8sClient(kubeconfig)
 	if err != nil {
 		log.Fatalf("cannot init k8s client: %v", err)
 	}
