@@ -11,9 +11,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-const RestartThreshold int32 = 5 // restart > 5 coi như bất thường
-
-func ScanPods(client *kubernetes.Clientset, ns string) ([]types.Issue, error) {
+func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) ([]types.Issue, error) {
 	opts := metav1.ListOptions{}
 	issues := []types.Issue{}
 
@@ -58,7 +56,7 @@ func ScanPods(client *kubernetes.Clientset, ns string) ([]types.Issue, error) {
 			}
 
 			// CASE 2: Restart count quá cao → tạo issue riêng
-			if sev := CheckRestartSeverity(cs.RestartCount); sev == "high" {
+			if sev := CheckRestartSeverity(cs.RestartCount, restartThreshold); sev == "high" {
 
 				issues = append(issues, types.Issue{
 					Kind:      "Pod",

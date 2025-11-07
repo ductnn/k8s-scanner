@@ -15,15 +15,17 @@ import (
 
 func main() {
 	var (
-		namespace string
-		format    string // json|table  (console output)
-		exportOpt string // csv,md,html,json  (comma-separated)
-		outdir    string // output directory for exported files
+		namespace        string
+		format           string // json|table  (console output)
+		exportOpt        string // csv,md,html,json  (comma-separated)
+		outdir           string // output directory for exported files
+		restartThreshold int    // threshold for restart count to be considered high severity
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
 	flag.StringVar(&exportOpt, "export", "", "Export report file(s): csv,md,html,json (comma-separated)")
 	flag.StringVar(&outdir, "outdir", ".reports", "Directory to write exported reports")
+	flag.IntVar(&restartThreshold, "restart-threshold", 5, "Restart count threshold for high severity (default: 5)")
 	flag.Parse()
 
 	clientset, err := k8s.NewK8sClient()
@@ -34,7 +36,7 @@ func main() {
 	// Scan
 	var issues []types.Issue
 
-	pods, _ := scanner.ScanPods(clientset, namespace)
+	pods, _ := scanner.ScanPods(clientset, namespace, int32(restartThreshold))
 	// deploys, _ := scanner.ScanDeploymentsNS(clientset, namespace)
 	// jobs, _ := scanner.ScanJobsNS(clientset, namespace)
 	// crons, _ := scanner.ScanCronJobsNS(clientset, namespace)
