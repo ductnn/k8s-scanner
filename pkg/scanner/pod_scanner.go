@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/ductnn/k8s-scanner/pkg/types"
@@ -13,7 +14,6 @@ import (
 
 func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) ([]types.Issue, error) {
 	opts := metav1.ListOptions{}
-	issues := []types.Issue{}
 
 	var pods *v1.PodList
 	var err error
@@ -24,57 +24,104 @@ func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) (
 		pods, err = client.CoreV1().Pods(ns).List(context.Background(), opts)
 	}
 	if err != nil {
-		return issues, err
+		return nil, err
 	}
 
+	if len(pods.Items) == 0 {
+		return []types.Issue{}, nil
+	}
+
+	// Collect unique namespaces for event fetching
+	namespaceSet := make(map[string]bool)
 	for _, pod := range pods.Items {
-		podStatus := GetPodStatus(pod)
+		namespaceSet[pod.Namespace] = true
+	}
+	namespaces := make([]string, 0, len(namespaceSet))
+	for ns := range namespaceSet {
+		namespaces = append(namespaces, ns)
+	}
 
-		for _, cs := range pod.Status.ContainerStatuses {
+	// Build event map once for all pods (major performance improvement)
+	eventMap := BuildEventMap(client, namespaces)
 
-			// CASE 1: Container đang waiting → ghi lại reason
-			if cs.State.Waiting != nil {
+	// Pre-allocate issues slice with estimated capacity
+	estimatedIssues := len(pods.Items) * 2 // rough estimate: 2 issues per pod
+	issues := make([]types.Issue, 0, estimatedIssues)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-				reason := cs.State.Waiting.Reason
-				sev := SeverityFromReason(reason)
-				rootCause := DetectPodRootCause(reason)
+	// Process pods concurrently
+	semaphore := make(chan struct{}, 50) // Limit concurrent goroutines to 50
 
-				issues = append(issues, types.Issue{
-					Kind:      "Pod",
-					Namespace: pod.Namespace,
-					Name:      pod.Name,
-					Severity:  sev,
-					Reason:    reason,
-					RootCause: rootCause,
-					// Suggestion:   SuggestionFromReason(reason),
-					PodStatus:    podStatus,
-					NodeName:     pod.Spec.NodeName,
-					Timestamp:    time.Now().Format(time.RFC3339),
-					RestartCount: cs.RestartCount,
-					LastEvent:    GetLatestPodEvent(client, pod.Namespace, pod.Name),
-				})
+	for i := range pods.Items {
+		wg.Add(1)
+		semaphore <- struct{}{} // Acquire semaphore
+
+		go func(pod v1.Pod) {
+			defer wg.Done()
+			defer func() { <-semaphore }() // Release semaphore
+
+			podIssues := processPod(pod, restartThreshold, eventMap)
+
+			// Thread-safe append
+			if len(podIssues) > 0 {
+				mu.Lock()
+				issues = append(issues, podIssues...)
+				mu.Unlock()
 			}
+		}(pods.Items[i])
+	}
 
-			// CASE 2: Restart count quá cao → tạo issue riêng
-			if sev := CheckRestartSeverity(cs.RestartCount, restartThreshold); sev == "high" {
+	wg.Wait()
+	return issues, nil
+}
 
-				issues = append(issues, types.Issue{
-					Kind:      "Pod",
-					Namespace: pod.Namespace,
-					Name:      pod.Name,
-					Severity:  sev,
-					Reason:    "HighRestartCount",
-					RootCause: "Container bị restart quá nhiều lần (unstable).",
-					// Suggestion:   "Kiểm tra logs, readiness/liveness probes và resource limits.",
-					PodStatus:    podStatus,
-					NodeName:     pod.Spec.NodeName,
-					Timestamp:    time.Now().Format(time.RFC3339),
-					RestartCount: cs.RestartCount,
-					LastEvent:    GetLatestPodEvent(client, pod.Namespace, pod.Name),
-				})
-			}
+// processPod processes a single pod and returns its issues
+func processPod(pod v1.Pod, restartThreshold int32, eventMap EventMap) []types.Issue {
+	podStatus := GetPodStatus(pod)
+	issues := make([]types.Issue, 0, 2) // Pre-allocate for 2 potential issues
+	timestamp := time.Now().Format(time.RFC3339)
+	lastEvent := GetLatestPodEvent(eventMap, pod.Namespace, pod.Name)
+
+	for _, cs := range pod.Status.ContainerStatuses {
+		// CASE 1: Container đang waiting → ghi lại reason
+		if cs.State.Waiting != nil {
+			reason := cs.State.Waiting.Reason
+			sev := SeverityFromReason(reason)
+			rootCause := DetectPodRootCause(reason)
+
+			issues = append(issues, types.Issue{
+				Kind:         "Pod",
+				Namespace:    pod.Namespace,
+				Name:         pod.Name,
+				Severity:     sev,
+				Reason:       reason,
+				RootCause:    rootCause,
+				PodStatus:    podStatus,
+				NodeName:     pod.Spec.NodeName,
+				Timestamp:    timestamp,
+				RestartCount: cs.RestartCount,
+				LastEvent:    lastEvent,
+			})
+		}
+
+		// CASE 2: Restart count quá cao → tạo issue riêng
+		if sev := CheckRestartSeverity(cs.RestartCount, restartThreshold); sev == "high" {
+			issues = append(issues, types.Issue{
+				Kind:         "Pod",
+				Namespace:    pod.Namespace,
+				Name:         pod.Name,
+				Severity:     sev,
+				Reason:       "HighRestartCount",
+				RootCause:    "Container bị restart quá nhiều lần (unstable).",
+				PodStatus:    podStatus,
+				NodeName:     pod.Spec.NodeName,
+				Timestamp:    timestamp,
+				RestartCount: cs.RestartCount,
+				LastEvent:    lastEvent,
+			})
 		}
 	}
 
-	return issues, nil
+	return issues
 }
