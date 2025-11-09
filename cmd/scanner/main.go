@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,7 +16,47 @@ import (
 	"github.com/ductnn/k8s-scanner/pkg/types"
 )
 
+func printUsage() {
+	fmt.Fprintf(flag.CommandLine.Output(), `k8s-scanner - Kubernetes cluster issues scanner
+
+USAGE:
+  k8s-scanner [OPTIONS]
+
+OPTIONS:
+`)
+	flag.PrintDefaults()
+	fmt.Fprintf(flag.CommandLine.Output(), `
+EXAMPLES:
+  # Scan all namespaces and display results
+  k8s-scanner
+
+  # Scan specific namespace
+  k8s-scanner --namespace default
+
+  # Export reports in multiple formats
+  k8s-scanner --export json,html,csv
+
+  # Show history of all reports
+  k8s-scanner --history
+
+  # Compare two reports
+  k8s-scanner --diff "daily-20251109-210646,daily-20251109-210704"
+
+  # Use custom kubeconfig
+  k8s-scanner --kubeconfig /path/to/config
+
+  # Set custom restart threshold
+  k8s-scanner --restart-threshold 10
+
+  # Output in JSON format
+  k8s-scanner --format json
+
+`)
+}
+
 func main() {
+	// Customize help output
+	flag.Usage = printUsage
 	var (
 		namespace        string
 		format           string // json|table  (console output)
@@ -34,6 +75,15 @@ func main() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
 	flag.BoolVar(&history, "history", false, "Show history of all reports")
 	flag.StringVar(&diff, "diff", "", "Compare two reports (format: 'old,new' directory names or 'old,new' paths)")
+
+	// Check for help flags in arguments before parsing
+	for _, arg := range os.Args[1:] {
+		if arg == "-h" || arg == "--help" || arg == "-help" {
+			flag.Usage()
+			return
+		}
+	}
+
 	flag.Parse()
 
 	// Handle history flag
