@@ -78,50 +78,70 @@ func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) (
 
 // processPod processes a single pod and returns its issues
 func processPod(pod v1.Pod, restartThreshold int32, eventMap EventMap) []types.Issue {
+	issues := make([]types.Issue, 0, 3)
 	podStatus := GetPodStatus(pod)
-	issues := make([]types.Issue, 0, 2) // Pre-allocate for 2 potential issues
 	timestamp := time.Now().Format(time.RFC3339)
 	lastEvent := GetLatestPodEvent(eventMap, pod.Namespace, pod.Name)
 
-	for _, cs := range pod.Status.ContainerStatuses {
-		// CASE 1: Container đang waiting → ghi lại reason
-		if cs.State.Waiting != nil {
-			reason := cs.State.Waiting.Reason
-			sev := SeverityFromReason(reason)
-			rootCause := DetectPodRootCause(reason)
+	// Check pod-level issues
+	if pod.Status.Phase == v1.PodFailed && pod.Status.Reason == "Evicted" {
+		issues = append(issues, createIssue(pod, "Evicted", podStatus, timestamp, lastEvent, getMaxRestartCount(pod)))
+	}
 
-			issues = append(issues, types.Issue{
-				Kind:         "Pod",
-				Namespace:    pod.Namespace,
-				Name:         pod.Name,
-				Severity:     sev,
-				Reason:       reason,
-				RootCause:    rootCause,
-				PodStatus:    podStatus,
-				NodeName:     pod.Spec.NodeName,
-				Timestamp:    timestamp,
-				RestartCount: cs.RestartCount,
-				LastEvent:    lastEvent,
-			})
+	// Check container-level issues
+	for _, cs := range pod.Status.ContainerStatuses {
+		// Check waiting state
+		if cs.State.Waiting != nil {
+			issues = append(issues, createIssue(pod, cs.State.Waiting.Reason, podStatus, timestamp, lastEvent, cs.RestartCount))
 		}
 
-		// CASE 2: Restart count quá cao → tạo issue riêng
-		if sev := CheckRestartSeverity(cs.RestartCount, restartThreshold); sev == "high" {
-			issues = append(issues, types.Issue{
-				Kind:         "Pod",
-				Namespace:    pod.Namespace,
-				Name:         pod.Name,
-				Severity:     sev,
-				Reason:       "HighRestartCount",
-				RootCause:    "Container bị restart quá nhiều lần (unstable).",
-				PodStatus:    podStatus,
-				NodeName:     pod.Spec.NodeName,
-				Timestamp:    timestamp,
-				RestartCount: cs.RestartCount,
-				LastEvent:    lastEvent,
-			})
+		// Check terminated state
+		if cs.State.Terminated != nil && cs.State.Terminated.Reason != "" {
+			issues = append(issues, createIssue(pod, cs.State.Terminated.Reason, podStatus, timestamp, lastEvent, cs.RestartCount))
+		}
+
+		// Check high restart count
+		if CheckRestartSeverity(cs.RestartCount, restartThreshold) == "high" {
+			issues = append(issues, createIssue(pod, "HighRestartCount", podStatus, timestamp, lastEvent, cs.RestartCount))
 		}
 	}
 
 	return issues
+}
+
+// getMaxRestartCount returns the maximum restart count from all containers
+func getMaxRestartCount(pod v1.Pod) int32 {
+	maxCount := int32(0)
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.RestartCount > maxCount {
+			maxCount = cs.RestartCount
+		}
+	}
+	return maxCount
+}
+
+// createIssue creates an Issue struct with common fields
+func createIssue(pod v1.Pod, reason string, podStatus string, timestamp string, lastEvent string, restartCount int32) types.Issue {
+	severity := SeverityFromReason(reason)
+	rootCause := DetectPodRootCause(reason)
+
+	// Special handling for HighRestartCount
+	if reason == "HighRestartCount" {
+		severity = "high"
+		rootCause = "Container bị restart quá nhiều lần (unstable)."
+	}
+
+	return types.Issue{
+		Kind:         "Pod",
+		Namespace:    pod.Namespace,
+		Name:         pod.Name,
+		Severity:     severity,
+		Reason:       reason,
+		RootCause:    rootCause,
+		PodStatus:    podStatus,
+		NodeName:     pod.Spec.NodeName,
+		Timestamp:    timestamp,
+		RestartCount: restartCount,
+		LastEvent:    lastEvent,
+	}
 }

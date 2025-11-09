@@ -6,6 +6,8 @@ func DetectPodRootCause(reason string) string {
 		return "Không pull được image — có thể sai tag, private registry hoặc thiếu quyền."
 	case "CrashLoopBackOff":
 		return "Container start xong rồi crash liên tục — thường do lỗi app hoặc config sai."
+	case "Evicted":
+		return "Pod bị evict do node thiếu tài nguyên (disk pressure, memory pressure) — cần kiểm tra node resources."
 	case "OOMKilled":
 		return "Container bị kill do thiếu bộ nhớ (Out-of-Memory)."
 	case "Pending":
