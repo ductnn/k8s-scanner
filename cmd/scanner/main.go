@@ -23,6 +23,8 @@ func main() {
 		outdir           string // output directory for exported files
 		restartThreshold int    // threshold for restart count to be considered high severity
 		kubeconfig       string // path to kubeconfig file
+		history          bool   // show history of reports
+		diff             string // compare two reports (format: "old,new" or directory names)
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -30,7 +32,25 @@ func main() {
 	flag.StringVar(&outdir, "outdir", ".reports", "Directory to write exported reports")
 	flag.IntVar(&restartThreshold, "restart-threshold", 5, "Restart count threshold for high severity (default: 5)")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
+	flag.BoolVar(&history, "history", false, "Show history of all reports")
+	flag.StringVar(&diff, "diff", "", "Compare two reports (format: 'old,new' directory names or 'old,new' paths)")
 	flag.Parse()
+
+	// Handle history flag
+	if history {
+		reports, err := report.ListHistory(outdir)
+		if err != nil {
+			log.Fatalf("failed to list history: %v", err)
+		}
+		report.PrintHistory(reports)
+		return
+	}
+
+	// Handle diff flag
+	if diff != "" {
+		handleDiff(diff, outdir)
+		return
+	}
 
 	clientset, err := k8s.NewK8sClient(kubeconfig)
 	if err != nil {
@@ -87,7 +107,7 @@ func main() {
 
 func parseExports(s string) []report.ExportKind {
 	var out []report.ExportKind
-	for p := range strings.SplitSeq(s, ",") {
+	for _, p := range strings.Split(s, ",") {
 		p = strings.TrimSpace(p)
 		switch strings.ToLower(p) {
 		case "json":
@@ -135,4 +155,42 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+func handleDiff(diffArg string, outdir string) {
+	parts := strings.Split(diffArg, ",")
+	if len(parts) != 2 {
+		log.Fatalf("diff requires exactly 2 arguments separated by comma (e.g., 'old,new' or 'daily-20251109-210646,daily-20251109-210704')")
+	}
+
+	oldPath := strings.TrimSpace(parts[0])
+	newPath := strings.TrimSpace(parts[1])
+
+	// If paths don't contain slashes, assume they're directory names
+	if !strings.Contains(oldPath, string(filepath.Separator)) && !strings.Contains(oldPath, "/") {
+		oldPath = filepath.Join(outdir, oldPath, "k8s-report.json")
+	} else if !filepath.IsAbs(oldPath) {
+		oldPath = filepath.Join(outdir, oldPath)
+	}
+
+	if !strings.Contains(newPath, string(filepath.Separator)) && !strings.Contains(newPath, "/") {
+		newPath = filepath.Join(outdir, newPath, "k8s-report.json")
+	} else if !filepath.IsAbs(newPath) {
+		newPath = filepath.Join(outdir, newPath)
+	}
+
+	// Load reports
+	oldReport, err := report.LoadReport(oldPath)
+	if err != nil {
+		log.Fatalf("failed to load old report from %s: %v", oldPath, err)
+	}
+
+	newReport, err := report.LoadReport(newPath)
+	if err != nil {
+		log.Fatalf("failed to load new report from %s: %v", newPath, err)
+	}
+
+	// Compare and display
+	result := report.DiffReports(oldReport, newReport)
+	report.PrintDiff(result, oldReport, newReport)
 }
