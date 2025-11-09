@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags like v1.0.0
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write # Required for creating releases
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for tags
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build all platforms
+        run: make build-all
+
+      - name: Create release archives
+        run: |
+          cd bin
+          tar -czf k8s-scanner-linux-amd64.tar.gz -C linux k8s-scanner
+          tar -czf k8s-scanner-darwin-amd64.tar.gz -C darwin k8s-scanner
+          zip -q k8s-scanner-windows-amd64.zip -j windows/k8s-scanner.exe
+
+      - name: Create checksums
+        run: |
+          cd bin
+          sha256sum k8s-scanner-linux-amd64.tar.gz > checksums.txt
+          sha256sum k8s-scanner-darwin-amd64.tar.gz >> checksums.txt
+          sha256sum k8s-scanner-windows-amd64.zip >> checksums.txt
+
+      - name: Get tag name
+        id: tag
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG_NAME"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            bin/k8s-scanner-linux-amd64.tar.gz
+            bin/k8s-scanner-darwin-amd64.tar.gz
+            bin/k8s-scanner-windows-amd64.zip
+            bin/checksums.txt
+          name: Release ${{ steps.tag.outputs.tag }}
+          body: |
+            ## k8s-scanner ${{ steps.tag.outputs.tag }}
+            
+            ### Downloads
+            
+            - **Linux**: [k8s-scanner-linux-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/k8s-scanner-linux-amd64.tar.gz)
+            - **macOS**: [k8s-scanner-darwin-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/k8s-scanner-darwin-amd64.tar.gz)
+            - **Windows**: [k8s-scanner-windows-amd64.zip](https://github.com/${{ github.repository }}/releases/download/${{ steps.tag.outputs.tag }}/k8s-scanner-windows-amd64.zip)
+            
+            ### Checksums
+            
+            See checksums.txt for SHA256 checksums.
+          draft: false
+          prerelease: false
+
