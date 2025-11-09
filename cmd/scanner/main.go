@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ductnn/k8s-scanner/pkg/k8s"
 	"github.com/ductnn/k8s-scanner/pkg/report"
@@ -68,16 +70,24 @@ func main() {
 	if exportOpt != "" {
 		kinds := parseExports(exportOpt)
 		base := "k8s-report"
-		if err := report.WriteAll(outdir, base, issues, sum, kinds); err != nil {
+
+		// Add timestamped subdirectory: daily-YYYYMMDD-HHMMSS
+		now := time.Now()
+		timestampDir := fmt.Sprintf("daily-%s-%s",
+			now.Format("20060102"), // YYYYMMDD
+			now.Format("150405"))   // HHMMSS
+		finalOutdir := filepath.Join(outdir, timestampDir)
+
+		if err := report.WriteAll(finalOutdir, base, issues, sum, kinds); err != nil {
 			log.Fatalf("export failed: %v", err)
 		}
-		fmt.Printf("\nExported to %s: %s.%s\n", outdir, base, strings.Join(stringify(kinds), ","))
+		fmt.Printf("\nExported to %s: %s.%s\n", finalOutdir, base, strings.Join(stringify(kinds), ","))
 	}
 }
 
 func parseExports(s string) []report.ExportKind {
 	var out []report.ExportKind
-	for _, p := range strings.Split(s, ",") {
+	for p := range strings.SplitSeq(s, ",") {
 		p = strings.TrimSpace(p)
 		switch strings.ToLower(p) {
 		case "json":
