@@ -13,6 +13,7 @@ import (
 	"github.com/ductnn/k8s-scanner/pkg/k8s"
 	"github.com/ductnn/k8s-scanner/pkg/report"
 	"github.com/ductnn/k8s-scanner/pkg/scanner"
+	"github.com/ductnn/k8s-scanner/pkg/scanner/pod"
 	"github.com/ductnn/k8s-scanner/pkg/types"
 )
 
@@ -110,7 +111,7 @@ func main() {
 	// Scan
 	var issues []types.Issue
 
-	pods, _ := scanner.ScanPods(clientset, namespace, int32(restartThreshold))
+	pods, _ := pod.ScanPods(clientset, namespace, int32(restartThreshold))
 	// deploys, _ := scanner.ScanDeploymentsNS(clientset, namespace)
 	// jobs, _ := scanner.ScanJobsNS(clientset, namespace)
 	// crons, _ := scanner.ScanCronJobsNS(clientset, namespace)

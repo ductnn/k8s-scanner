@@ -1,4 +1,4 @@
-package scanner
+package pod
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// ScanPods scans pods in the specified namespace and returns issues
 func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) ([]types.Issue, error) {
 	opts := metav1.ListOptions{}
 

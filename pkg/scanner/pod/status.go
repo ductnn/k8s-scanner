@@ -1,9 +1,10 @@
-package scanner
+package pod
 
 import (
 	v1 "k8s.io/api/core/v1"
 )
 
+// GetPodStatus extracts the status string from a pod
 func GetPodStatus(pod v1.Pod) string {
 	if pod.Status.Phase != "" {
 		return string(pod.Status.Phase)
@@ -23,3 +24,4 @@ func GetPodStatus(pod v1.Pod) string {
 
 	return "Unknown"
 }
+

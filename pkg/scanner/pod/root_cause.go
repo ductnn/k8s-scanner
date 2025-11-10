@@ -1,5 +1,6 @@
-package scanner
+package pod
 
+// DetectPodRootCause returns a human-readable root cause for pod issues
 func DetectPodRootCause(reason string) string {
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull":

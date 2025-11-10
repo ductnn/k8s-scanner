@@ -1,5 +1,6 @@
-package scanner
+package pod
 
+// SeverityFromReason maps pod reason to severity level
 func SeverityFromReason(reason string) string {
 	switch reason {
 	case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff":
@@ -12,3 +13,4 @@ func SeverityFromReason(reason string) string {
 		return "low"
 	}
 }
+
