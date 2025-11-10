@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ductnn/k8s-scanner/pkg/k8s"
+	"github.com/ductnn/k8s-scanner/pkg/metrics"
 	"github.com/ductnn/k8s-scanner/pkg/report"
 	"github.com/ductnn/k8s-scanner/pkg/scanner"
 	"github.com/ductnn/k8s-scanner/pkg/scanner/pod"
@@ -52,6 +53,9 @@ EXAMPLES:
   # Output in JSON format
   k8s-scanner --format json
 
+  # Enable Prometheus metrics server
+  k8s-scanner --metrics --metrics-port 9090
+
 `)
 }
 
@@ -67,6 +71,8 @@ func main() {
 		kubeconfig       string // path to kubeconfig file
 		history          bool   // show history of reports
 		diff             string // compare two reports (format: "old,new" or directory names)
+		metricsPort      int    // port for Prometheus metrics server
+		enableMetrics    bool   // enable Prometheus metrics server
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -76,7 +82,8 @@ func main() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
 	flag.BoolVar(&history, "history", false, "Show history of all reports")
 	flag.StringVar(&diff, "diff", "", "Compare two reports (format: 'old,new' directory names or 'old,new' paths)")
-
+	flag.BoolVar(&enableMetrics, "metrics", false, "Enable Prometheus metrics server")
+	flag.IntVar(&metricsPort, "metrics-port", 9090, "Port for Prometheus metrics server (default: 9090)")
 	// Check for help flags in arguments before parsing
 	for _, arg := range os.Args[1:] {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
@@ -86,6 +93,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// Initialize and start metrics server if enabled
+	if enableMetrics {
+		metrics.Init()
+		go metrics.StartServer(metricsPort)
+	}
 
 	// Handle history flag
 	if history {
@@ -107,8 +120,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot init k8s client: %v", err)
 	}
-
-	// Scan
 	var issues []types.Issue
 
 	pods, _ := pod.ScanPods(clientset, namespace, int32(restartThreshold))
@@ -123,6 +134,11 @@ func main() {
 
 	// Summary
 	sum := scanner.SummarizeByNamespace(issues)
+
+	// Export metrics if enabled
+	if enableMetrics {
+		metrics.ExportSummary(sum)
+	}
 
 	// Console output
 	switch strings.ToLower(format) {
@@ -153,6 +169,12 @@ func main() {
 			log.Fatalf("export failed: %v", err)
 		}
 		fmt.Printf("\nExported to %s: %s.%s\n", finalOutdir, base, strings.Join(stringify(kinds), ","))
+	}
+
+	// Keep program running if metrics server is enabled
+	if enableMetrics {
+		fmt.Println("\nMetrics server is running. Press Ctrl+C to stop.")
+		select {} // Block forever to keep metrics server running
 	}
 }
 
