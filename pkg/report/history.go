@@ -37,17 +37,21 @@ func ListHistory(outdir string) ([]ReportInfo, error) {
 
 	var reports []ReportInfo
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
 
-		dirName := entry.Name()
-		// Check if it matches the pattern: daily-YYYYMMDD-HHMMSS
-		if !strings.HasPrefix(dirName, "daily-") {
+		fileName := entry.Name()
+		// Check if it matches the pattern: [cluster-name]-k8s-report-YYYYMMDD-HHMMSS.json or k8s-report-YYYYMMDD-HHMMSS.json
+		if !strings.HasSuffix(fileName, ".json") {
+			continue
+		}
+		// Must contain "k8s-report-" somewhere in the filename
+		if !strings.Contains(fileName, "k8s-report-") {
 			continue
 		}
 
-		reportPath := filepath.Join(outdir, dirName, "k8s-report.json")
+		reportPath := filepath.Join(outdir, fileName)
 		if _, err := os.Stat(reportPath); err != nil {
 			// Skip if JSON report doesn't exist
 			continue
@@ -63,7 +67,7 @@ func ListHistory(outdir string) ([]ReportInfo, error) {
 
 		reports = append(reports, ReportInfo{
 			Path:        reportPath,
-			DirName:     dirName,
+			DirName:     fileName, // Store full filename for display
 			GeneratedAt: generatedAt,
 			IssueCount:  len(reportData.Issues),
 			Summary:     reportData.Summary,
@@ -101,7 +105,7 @@ func PrintHistory(reports []ReportInfo) {
 	}
 
 	fmt.Println("\n=== Historical Reports ===")
-	fmt.Printf("%-30s | %-20s | %-8s | %-10s\n", "DIRECTORY", "GENERATED AT", "ISSUES", "SUMMARY")
+	fmt.Printf("%-30s | %-20s | %-8s | %-10s\n", "FILENAME", "GENERATED AT", "ISSUES", "SUMMARY")
 	fmt.Println(strings.Repeat("-", 100))
 
 	for _, r := range reports {

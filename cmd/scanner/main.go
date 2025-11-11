@@ -41,8 +41,9 @@ EXAMPLES:
   # Show history of all reports
   k8s-scanner --history
 
-  # Compare two reports
-  k8s-scanner --diff "daily-20251109-210646,daily-20251109-210704"
+  # Compare two reports (by timestamp or filename)
+  k8s-scanner --diff "20251109-210646,20251109-210704"
+  k8s-scanner --diff "k8s-report-20251109-210646.json,k8s-report-20251109-210704.json"
 
   # Use custom kubeconfig
   k8s-scanner --kubeconfig /path/to/config
@@ -58,6 +59,9 @@ EXAMPLES:
 
   # Ignore specific namespaces
   k8s-scanner --ignore-ns "kube-system,kube-public"
+
+  # Use custom cluster name for output files
+  k8s-scanner --cluster-name "production" --export json,html
 
 `)
 }
@@ -77,6 +81,7 @@ func main() {
 		metricsPort      int    // port for Prometheus metrics server
 		enableMetrics    bool   // enable Prometheus metrics server
 		ignoreNS         string // comma-separated list of namespaces to ignore
+		clusterName      string // cluster name for output files (auto-detected if not provided)
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -89,6 +94,7 @@ func main() {
 	flag.BoolVar(&enableMetrics, "metrics", false, "Enable Prometheus metrics server")
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "Port for Prometheus metrics server (default: 9090)")
 	flag.StringVar(&ignoreNS, "ignore-ns", "", "Comma-separated list of namespaces to ignore (e.g., 'kube-system,kube-public')")
+	flag.StringVar(&clusterName, "cluster-name", "", "Cluster name for output files (auto-detected from kubeconfig if not provided)")
 	// Check for help flags in arguments before parsing
 	for _, arg := range os.Args[1:] {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
@@ -125,6 +131,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot init k8s client: %v", err)
 	}
+
+	// Auto-detect cluster name if not provided
+	if clusterName == "" {
+		detected, err := k8s.GetCurrentContext(kubeconfig)
+		if err == nil && detected != "" {
+			clusterName = detected
+		}
+	}
+
 	var issues []types.Issue
 
 	// Parse ignored namespaces
@@ -163,19 +178,27 @@ func main() {
 	// Export files
 	if exportOpt != "" {
 		kinds := parseExports(exportOpt)
-		base := "k8s-report"
 
-		// Add timestamped subdirectory: daily-YYYYMMDD-HHMMSS
+		// Add timestamp to filename: [cluster-name]-k8s-report-YYYYMMDD-HHMMSS
 		now := time.Now()
-		timestampDir := fmt.Sprintf("daily-%s-%s",
+		timestamp := fmt.Sprintf("%s-%s",
 			now.Format("20060102"), // YYYYMMDD
 			now.Format("150405"))   // HHMMSS
-		finalOutdir := filepath.Join(outdir, timestampDir)
 
-		if err := report.WriteAll(finalOutdir, base, issues, sum, kinds); err != nil {
+		// Build base filename with optional cluster name prefix
+		var base string
+		if clusterName != "" {
+			// Sanitize cluster name for filename (remove invalid characters)
+			sanitized := sanitizeClusterName(clusterName)
+			base = fmt.Sprintf("%s-k8s-report-%s", sanitized, timestamp)
+		} else {
+			base = fmt.Sprintf("k8s-report-%s", timestamp)
+		}
+
+		if err := report.WriteAll(outdir, base, issues, sum, kinds); err != nil {
 			log.Fatalf("export failed: %v", err)
 		}
-		fmt.Printf("\nExported to %s: %s.%s\n", finalOutdir, base, strings.Join(stringify(kinds), ","))
+		fmt.Printf("\nExported to %s: %s.%s\n", outdir, base, strings.Join(stringify(kinds), ","))
 	}
 
 	// Keep program running if metrics server is enabled
@@ -251,24 +274,87 @@ func parseIgnoredNamespaces(ignoreNS string) map[string]bool {
 	return ignored
 }
 
+func sanitizeClusterName(name string) string {
+	// Replace invalid filename characters with hyphens
+	invalid := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|", " "}
+	sanitized := name
+	for _, char := range invalid {
+		sanitized = strings.ReplaceAll(sanitized, char, "-")
+	}
+	// Remove consecutive hyphens
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+	// Remove leading/trailing hyphens
+	sanitized = strings.Trim(sanitized, "-")
+	return sanitized
+}
+
+func findReportFile(outdir, timestamp string) string {
+	// Look for files matching the timestamp pattern
+	// Pattern: [cluster-name]-k8s-report-YYYYMMDD-HHMMSS.json or k8s-report-YYYYMMDD-HHMMSS.json
+	entries, err := os.ReadDir(outdir)
+	if err != nil {
+		return ""
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		fileName := entry.Name()
+		if !strings.HasSuffix(fileName, ".json") {
+			continue
+		}
+		// Check if filename ends with the timestamp pattern
+		if strings.HasSuffix(fileName, fmt.Sprintf("k8s-report-%s.json", timestamp)) {
+			return filepath.Join(outdir, fileName)
+		}
+	}
+	return ""
+}
+
 func handleDiff(diffArg string, outdir string) {
 	parts := strings.Split(diffArg, ",")
 	if len(parts) != 2 {
-		log.Fatalf("diff requires exactly 2 arguments separated by comma (e.g., 'old,new' or 'daily-20251109-210646,daily-20251109-210704')")
+		log.Fatalf("diff requires exactly 2 arguments separated by comma (e.g., '20251109-210646,20251109-210704' or 'k8s-report-20251109-210646.json,k8s-report-20251109-210704.json')")
 	}
 
 	oldPath := strings.TrimSpace(parts[0])
 	newPath := strings.TrimSpace(parts[1])
 
-	// If paths don't contain slashes, assume they're directory names
+	// If paths don't contain slashes, assume they're timestamp identifiers or filenames
 	if !strings.Contains(oldPath, string(filepath.Separator)) && !strings.Contains(oldPath, "/") {
-		oldPath = filepath.Join(outdir, oldPath, "k8s-report.json")
+		// Check if it's just a timestamp (e.g., "20251109-143022") or full filename
+		if !strings.HasSuffix(oldPath, ".json") {
+			// Try to find matching report file (could be with or without cluster name prefix)
+			// First try with cluster prefix pattern, then without
+			matched := findReportFile(outdir, oldPath)
+			if matched != "" {
+				oldPath = matched
+			} else {
+				oldPath = filepath.Join(outdir, fmt.Sprintf("k8s-report-%s.json", oldPath))
+			}
+		} else {
+			oldPath = filepath.Join(outdir, oldPath)
+		}
 	} else if !filepath.IsAbs(oldPath) {
 		oldPath = filepath.Join(outdir, oldPath)
 	}
 
 	if !strings.Contains(newPath, string(filepath.Separator)) && !strings.Contains(newPath, "/") {
-		newPath = filepath.Join(outdir, newPath, "k8s-report.json")
+		// Check if it's just a timestamp (e.g., "20251109-143022") or full filename
+		if !strings.HasSuffix(newPath, ".json") {
+			// Try to find matching report file (could be with or without cluster name prefix)
+			matched := findReportFile(outdir, newPath)
+			if matched != "" {
+				newPath = matched
+			} else {
+				newPath = filepath.Join(outdir, fmt.Sprintf("k8s-report-%s.json", newPath))
+			}
+		} else {
+			newPath = filepath.Join(outdir, newPath)
+		}
 	} else if !filepath.IsAbs(newPath) {
 		newPath = filepath.Join(outdir, newPath)
 	}
