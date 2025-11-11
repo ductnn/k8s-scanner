@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: oomkill-demo
+  namespace: demo
+spec:
+  containers:
+  - name: app
+    image: busybox
+    command: ["sh", "-c", "dd if=/dev/zero of=/dev/null bs=1M"]
+    resources:
+      limits:
+        memory: "20Mi"
+      requests:
+        memory: "20Mi"
