@@ -78,7 +78,7 @@ func main() {
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
 	flag.StringVar(&exportOpt, "export", "", "Export report file(s): csv,md,html,json (comma-separated)")
 	flag.StringVar(&outdir, "outdir", ".reports", "Directory to write exported reports")
-	flag.IntVar(&restartThreshold, "restart-threshold", 5, "Restart count threshold for high severity (default: 5)")
+	flag.IntVar(&restartThreshold, "restart-threshold", 10, "Restart count threshold for high severity (default: 10)")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config)")
 	flag.BoolVar(&history, "history", false, "Show history of all reports")
 	flag.StringVar(&diff, "diff", "", "Compare two reports (format: 'old,new' directory names or 'old,new' paths)")
