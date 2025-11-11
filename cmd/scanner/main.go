@@ -56,6 +56,9 @@ EXAMPLES:
   # Enable Prometheus metrics server
   k8s-scanner --metrics --metrics-port 9090
 
+  # Ignore specific namespaces
+  k8s-scanner --ignore-ns "kube-system,kube-public"
+
 `)
 }
 
@@ -73,6 +76,7 @@ func main() {
 		diff             string // compare two reports (format: "old,new" or directory names)
 		metricsPort      int    // port for Prometheus metrics server
 		enableMetrics    bool   // enable Prometheus metrics server
+		ignoreNS         string // comma-separated list of namespaces to ignore
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -84,6 +88,7 @@ func main() {
 	flag.StringVar(&diff, "diff", "", "Compare two reports (format: 'old,new' directory names or 'old,new' paths)")
 	flag.BoolVar(&enableMetrics, "metrics", false, "Enable Prometheus metrics server")
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "Port for Prometheus metrics server (default: 9090)")
+	flag.StringVar(&ignoreNS, "ignore-ns", "", "Comma-separated list of namespaces to ignore (e.g., 'kube-system,kube-public')")
 	// Check for help flags in arguments before parsing
 	for _, arg := range os.Args[1:] {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
@@ -122,7 +127,9 @@ func main() {
 	}
 	var issues []types.Issue
 
-	pods, _ := pod.ScanPods(clientset, namespace, int32(restartThreshold))
+	// Parse ignored namespaces
+	ignoredNamespaces := parseIgnoredNamespaces(ignoreNS)
+	pods, _ := pod.ScanPods(clientset, namespace, int32(restartThreshold), ignoredNamespaces)
 	// deploys, _ := scanner.ScanDeploymentsNS(clientset, namespace)
 	// jobs, _ := scanner.ScanJobsNS(clientset, namespace)
 	// crons, _ := scanner.ScanCronJobsNS(clientset, namespace)
@@ -228,6 +235,20 @@ func trunc(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+func parseIgnoredNamespaces(ignoreNS string) map[string]bool {
+	ignored := make(map[string]bool)
+	if ignoreNS == "" {
+		return ignored
+	}
+	for _, ns := range strings.Split(ignoreNS, ",") {
+		ns = strings.TrimSpace(ns)
+		if ns != "" {
+			ignored[ns] = true
+		}
+	}
+	return ignored
 }
 
 func handleDiff(diffArg string, outdir string) {

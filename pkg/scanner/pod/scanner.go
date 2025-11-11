@@ -13,7 +13,7 @@ import (
 )
 
 // ScanPods scans pods in the specified namespace and returns issues
-func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) ([]types.Issue, error) {
+func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32, ignoredNamespaces map[string]bool) ([]types.Issue, error) {
 	opts := metav1.ListOptions{}
 
 	var pods *v1.PodList
@@ -26,6 +26,21 @@ func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32) (
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	if len(pods.Items) == 0 {
+		return []types.Issue{}, nil
+	}
+
+	// Filter out pods from ignored namespaces
+	if len(ignoredNamespaces) > 0 {
+		filteredPods := make([]v1.Pod, 0, len(pods.Items))
+		for _, pod := range pods.Items {
+			if !ignoredNamespaces[pod.Namespace] {
+				filteredPods = append(filteredPods, pod)
+			}
+		}
+		pods.Items = filteredPods
 	}
 
 	if len(pods.Items) == 0 {
