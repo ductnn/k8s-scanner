@@ -147,7 +147,7 @@ th{background:#f5f5f5;text-align:left}
 
 	// Issues
 	sb.WriteString("<h2>Issues</h2><table><thead><tr>")
-	cols := []string{"Time", "Namespace", "Kind", "Name", "Severity", "PodStatus", "Reason", "RootCause", "Suggestion", "Node", "RestartCount", "LastEvent"}
+	cols := []string{"Time", "Namespace", "Kind", "Name", "Severity", "PodStatus", "Reason", "RootCause", "Node", "RestartCount", "LastEvent"}
 	for _, c := range cols {
 		sb.WriteString("<th>" + c + "</th>")
 	}
