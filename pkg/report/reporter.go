@@ -127,9 +127,11 @@ h1,h2{margin:0 0 12px}
 table{border-collapse:collapse;width:100%;margin:12px 0}
 th,td{border:1px solid #ddd;padding:8px;font-size:14px}
 th{background:#f5f5f5;text-align:left}
-.badge{padding:2px 8px;border-radius:12px;display:inline-block}
-.badge.CRITICAL{background:#fee2e2} .badge.HIGH{background:#ffedd5}
-.badge.MEDIUM{background:#fef9c3} .badge.LOW{background:#e5f6ff}
+.badge{padding:4px 10px;border-radius:4px;display:inline-block;font-weight:bold;font-size:12px}
+.badge.CRITICAL{background:#dc2626;color:#fff}
+.badge.HIGH{background:#ea580c;color:#fff}
+.badge.MEDIUM{background:#ca8a04;color:#fff}
+.badge.LOW{background:#0284c7;color:#fff}
 .small{color:#666;font-size:12px}
 </style></head><body>`)
 	sb.WriteString("<h1>Kubernetes Issues Report</h1>")
@@ -158,15 +160,18 @@ th{background:#f5f5f5;text-align:left}
 	sb.WriteString("</tr></thead><tbody>")
 	for _, is := range issues {
 		sb.WriteString("<tr>")
-		row := []string{
-			is.Timestamp, is.Namespace, is.Kind, is.Name,
-			fmt.Sprintf("<span class='badge %s'>%s</span>", strings.ToUpper(is.Severity), strings.ToUpper(is.Severity)),
-			is.PodStatus, is.Reason, is.RootCause, is.NodeName,
-			fmt.Sprint(is.RestartCount), is.LastEvent,
-		}
-		for _, v := range row {
-			sb.WriteString("<td>" + html.EscapeString(v) + "</td>")
-		}
+		severityBadge := fmt.Sprintf("<span class='badge %s'>%s</span>", strings.ToUpper(is.Severity), strings.ToUpper(is.Severity))
+		sb.WriteString("<td>" + html.EscapeString(is.Timestamp) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.Namespace) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.Kind) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.Name) + "</td>")
+		sb.WriteString("<td>" + severityBadge + "</td>") // Don't escape HTML badge
+		sb.WriteString("<td>" + html.EscapeString(is.PodStatus) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.Reason) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.RootCause) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.NodeName) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(fmt.Sprint(is.RestartCount)) + "</td>")
+		sb.WriteString("<td>" + html.EscapeString(is.LastEvent) + "</td>")
 		sb.WriteString("</tr>")
 	}
 	sb.WriteString("</tbody></table></body></html>")
