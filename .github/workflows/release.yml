@@ -25,6 +25,8 @@ jobs:
           go-version-file: 'go.mod'
 
       - name: Build all platforms
+        env:
+          CGO_ENABLED: 0
         run: make build-all
 
       - name: Create release archives

@@ -1,8 +1,9 @@
 .PHONY: build-linux build-mac build-windows build-all
 
-LINUX=env GOOS=linux GOARCH=amd64 go build -v
-MAC=env GOOS=darwin GOARCH=amd64 go build -v
-WINDOWS=env GOOS=windows GOARCH=amd64 go build -v
+# Build with CGO disabled for compatibility with older systems (CentOS 7)
+LINUX=env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -v
+MAC=env CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -v
+WINDOWS=env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -v
 
 build-linux:
 	@mkdir -p bin/linux
