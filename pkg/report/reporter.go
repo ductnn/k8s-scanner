@@ -69,6 +69,10 @@ func WriteAll(outdir string, basename string, issues []types.Issue, summary map[
 
 func csvReport(issues []types.Issue) ([]byte, error) {
 	buf := &bytes.Buffer{}
+
+	// Add UTF-8 BOM for proper encoding in Excel and other tools
+	buf.WriteString("\xEF\xBB\xBF")
+
 	w := csv.NewWriter(buf)
 	_ = w.Write([]string{
 		"timestamp", "namespace", "kind", "name", "severity", "pod_status",
