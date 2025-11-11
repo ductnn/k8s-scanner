@@ -3,14 +3,13 @@ package pod
 // SeverityFromReason maps pod reason to severity level
 func SeverityFromReason(reason string) string {
 	switch reason {
-	case "ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff":
+	case "ImagePullBackOff", "ErrImagePull":
 		return "critical"
-	case "Evicted", "OOMKilled":
+	case "CrashLoopBackOff", "Pending":
 		return "high"
-	case "Pending":
+	case "Evicted", "OOMKilled":
 		return "medium"
 	default:
 		return "low"
 	}
 }
-
