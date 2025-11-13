@@ -16,6 +16,8 @@ import (
 	"github.com/ductnn/k8s-scanner/pkg/scanner"
 	"github.com/ductnn/k8s-scanner/pkg/scanner/pod"
 	"github.com/ductnn/k8s-scanner/pkg/types"
+
+	"k8s.io/client-go/kubernetes"
 )
 
 func printUsage() {
@@ -67,6 +69,15 @@ EXAMPLES:
   # Output only the count of issues
   k8s-scanner --count
 
+  # Clean evicted pods and completed jobs (dry-run)
+  k8s-scanner --clean --dry-run
+
+  # Clean evicted pods and completed jobs (actually delete)
+  k8s-scanner --clean
+
+  # Clean pods in specific namespace(s)
+  k8s-scanner --clean --namespace "default,test"
+
 `)
 }
 
@@ -87,6 +98,8 @@ func main() {
 		ignoreNS         string // comma-separated list of namespaces to ignore
 		clusterName      string // cluster name for output files (auto-detected if not provided)
 		count            bool   // output only the count of issues
+		clean            bool   // clean evicted pods and completed jobs
+		dryRun           bool   // dry-run mode for clean (show what would be deleted without deleting)
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace(s) to scan: comma-separated list (e.g., 'ns-1,ns-2') or empty for all")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -101,6 +114,8 @@ func main() {
 	flag.StringVar(&ignoreNS, "ignore-ns", "", "Comma-separated list of namespaces to ignore (e.g., 'kube-system,kube-public')")
 	flag.StringVar(&clusterName, "cluster-name", "", "Cluster name for output files (auto-detected from kubeconfig if not provided)")
 	flag.BoolVar(&count, "count", false, "Output only the count of issues found")
+	flag.BoolVar(&clean, "clean", false, "Clean evicted pods and completed jobs")
+	flag.BoolVar(&dryRun, "dry-run", false, "Dry-run mode for clean (show what would be deleted without actually deleting)")
 	// Check for help flags in arguments before parsing
 	for _, arg := range os.Args[1:] {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
@@ -136,6 +151,12 @@ func main() {
 	clientset, err := k8s.NewK8sClient(kubeconfig)
 	if err != nil {
 		log.Fatalf("cannot init k8s client: %v", err)
+	}
+
+	// Handle clean flag
+	if clean {
+		handleClean(clientset, namespace, ignoreNS, dryRun)
+		return
 	}
 
 	// Auto-detect cluster name if not provided
@@ -397,4 +418,67 @@ func handleDiff(diffArg string, outdir string) {
 	// Compare and display
 	result := report.DiffReports(oldReport, newReport)
 	report.PrintDiff(result, oldReport, newReport)
+}
+
+func handleClean(clientset *kubernetes.Clientset, namespace string, ignoreNS string, dryRun bool) {
+	// Parse ignored namespaces
+	ignoredNamespaces := parseIgnoredNamespaces(ignoreNS)
+
+	// Parse namespace flag (comma-separated list)
+	var namespacesToScan []string
+	if namespace != "" {
+		for _, ns := range strings.Split(namespace, ",") {
+			ns = strings.TrimSpace(ns)
+			if ns != "" {
+				namespacesToScan = append(namespacesToScan, ns)
+			}
+		}
+	}
+
+	// Clean pods
+	result, err := pod.CleanPods(clientset, namespacesToScan, ignoredNamespaces, dryRun)
+	if err != nil {
+		log.Fatalf("failed to clean pods: %v", err)
+	}
+
+	// Display results
+	if dryRun {
+		fmt.Println("\n=== Dry-run: Pods that would be deleted ===")
+	} else {
+		fmt.Println("\n=== Cleaned Pods ===")
+	}
+
+	if len(result.DeletedPods) == 0 {
+		fmt.Println("No pods to clean.")
+		return
+	}
+
+	// Print table header
+	fmt.Println("NAMESPACE | NAME | REASON | SEVERITY")
+	fmt.Println(strings.Repeat("-", 60))
+
+	// Print each pod
+	for _, p := range result.DeletedPods {
+		fmt.Printf("%-9s | %-20s | %-15s | %-8s\n",
+			trunc(p.Namespace, 9),
+			trunc(p.Name, 20),
+			trunc(p.Reason, 15),
+			strings.ToUpper(p.Severity))
+	}
+
+	// Print summary
+	fmt.Printf("\nTotal: %d pod(s)", len(result.DeletedPods))
+	if dryRun {
+		fmt.Println(" (would be deleted)")
+	} else {
+		fmt.Println(" (deleted)")
+	}
+
+	// Print errors if any
+	if len(result.Errors) > 0 {
+		fmt.Println("\n=== Errors ===")
+		for _, err := range result.Errors {
+			fmt.Printf("Error: %v\n", err)
+		}
+	}
 }
