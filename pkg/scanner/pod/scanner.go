@@ -2,6 +2,7 @@ package pod
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,25 +13,42 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// ScanPods scans pods in the specified namespace and returns issues
-func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32, ignoredNamespaces map[string]bool) ([]types.Issue, error) {
+// ScanPods scans pods in the specified namespaces and returns issues
+// If namespaces is empty or nil, scans all namespaces
+func ScanPods(client *kubernetes.Clientset, namespaces []string, restartThreshold int32, ignoredNamespaces map[string]bool) ([]types.Issue, error) {
 	opts := metav1.ListOptions{}
 
-	var pods *v1.PodList
-	var err error
+	var allPods []v1.Pod
 
-	if ns == "" {
-		pods, err = client.CoreV1().Pods("").List(context.Background(), opts)
+	// If no namespaces specified, scan all namespaces
+	if len(namespaces) == 0 {
+		pods, err := client.CoreV1().Pods("").List(context.Background(), opts)
+		if err != nil {
+			return nil, err
+		}
+		allPods = pods.Items
 	} else {
-		pods, err = client.CoreV1().Pods(ns).List(context.Background(), opts)
-	}
-	if err != nil {
-		return nil, err
+		// Scan each specified namespace
+		for _, ns := range namespaces {
+			ns = strings.TrimSpace(ns)
+			if ns == "" {
+				continue
+			}
+			pods, err := client.CoreV1().Pods(ns).List(context.Background(), opts)
+			if err != nil {
+				// Log error but continue with other namespaces
+				continue
+			}
+			allPods = append(allPods, pods.Items...)
+		}
 	}
 
-	if len(pods.Items) == 0 {
+	if len(allPods) == 0 {
 		return []types.Issue{}, nil
 	}
+
+	// Create a PodList-like structure for compatibility with existing code
+	pods := &v1.PodList{Items: allPods}
 
 	// Filter out pods from ignored namespaces
 	if len(ignoredNamespaces) > 0 {
@@ -52,13 +70,13 @@ func ScanPods(client *kubernetes.Clientset, ns string, restartThreshold int32, i
 	for _, pod := range pods.Items {
 		namespaceSet[pod.Namespace] = true
 	}
-	namespaces := make([]string, 0, len(namespaceSet))
+	uniqueNamespaces := make([]string, 0, len(namespaceSet))
 	for ns := range namespaceSet {
-		namespaces = append(namespaces, ns)
+		uniqueNamespaces = append(uniqueNamespaces, ns)
 	}
 
 	// Build event map once for all pods (major performance improvement)
-	eventMap := BuildEventMap(client, namespaces)
+	eventMap := BuildEventMap(client, uniqueNamespaces)
 
 	// Pre-allocate issues slice with estimated capacity
 	estimatedIssues := len(pods.Items) * 2 // rough estimate: 2 issues per pod

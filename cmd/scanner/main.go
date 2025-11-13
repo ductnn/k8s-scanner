@@ -32,8 +32,9 @@ EXAMPLES:
   # Scan all namespaces and display results
   k8s-scanner
 
-  # Scan specific namespace
+  # Scan specific namespace(s)
   k8s-scanner --namespace default
+  k8s-scanner --namespace "ns-1,ns-2,ns-3"
 
   # Export reports in multiple formats
   k8s-scanner --export json,html,csv
@@ -83,7 +84,7 @@ func main() {
 		ignoreNS         string // comma-separated list of namespaces to ignore
 		clusterName      string // cluster name for output files (auto-detected if not provided)
 	)
-	flag.StringVar(&namespace, "namespace", "", "Namespace to scan (empty = all)")
+	flag.StringVar(&namespace, "namespace", "", "Namespace(s) to scan: comma-separated list (e.g., 'ns-1,ns-2') or empty for all")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
 	flag.StringVar(&exportOpt, "export", "", "Export report file(s): csv,md,html,json (comma-separated)")
 	flag.StringVar(&outdir, "outdir", ".reports", "Directory to write exported reports")
@@ -144,7 +145,19 @@ func main() {
 
 	// Parse ignored namespaces
 	ignoredNamespaces := parseIgnoredNamespaces(ignoreNS)
-	pods, _ := pod.ScanPods(clientset, namespace, int32(restartThreshold), ignoredNamespaces)
+
+	// Parse namespace flag (comma-separated list)
+	var namespacesToScan []string
+	if namespace != "" {
+		for _, ns := range strings.Split(namespace, ",") {
+			ns = strings.TrimSpace(ns)
+			if ns != "" {
+				namespacesToScan = append(namespacesToScan, ns)
+			}
+		}
+	}
+
+	pods, _ := pod.ScanPods(clientset, namespacesToScan, int32(restartThreshold), ignoredNamespaces)
 	// deploys, _ := scanner.ScanDeploymentsNS(clientset, namespace)
 	// jobs, _ := scanner.ScanJobsNS(clientset, namespace)
 	// crons, _ := scanner.ScanCronJobsNS(clientset, namespace)
