@@ -64,6 +64,9 @@ EXAMPLES:
   # Use custom cluster name for output files
   k8s-scanner --cluster-name "production" --export json,html
 
+  # Output only the count of issues
+  k8s-scanner --count
+
 `)
 }
 
@@ -83,6 +86,7 @@ func main() {
 		enableMetrics    bool   // enable Prometheus metrics server
 		ignoreNS         string // comma-separated list of namespaces to ignore
 		clusterName      string // cluster name for output files (auto-detected if not provided)
+		count            bool   // output only the count of issues
 	)
 	flag.StringVar(&namespace, "namespace", "", "Namespace(s) to scan: comma-separated list (e.g., 'ns-1,ns-2') or empty for all")
 	flag.StringVar(&format, "format", "table", "Console output format: json|table")
@@ -96,6 +100,7 @@ func main() {
 	flag.IntVar(&metricsPort, "metrics-port", 9090, "Port for Prometheus metrics server (default: 9090)")
 	flag.StringVar(&ignoreNS, "ignore-ns", "", "Comma-separated list of namespaces to ignore (e.g., 'kube-system,kube-public')")
 	flag.StringVar(&clusterName, "cluster-name", "", "Cluster name for output files (auto-detected from kubeconfig if not provided)")
+	flag.BoolVar(&count, "count", false, "Output only the count of issues found")
 	// Check for help flags in arguments before parsing
 	for _, arg := range os.Args[1:] {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
@@ -173,6 +178,42 @@ func main() {
 	// Export metrics if enabled
 	if enableMetrics {
 		metrics.ExportSummary(sum)
+	}
+
+	// If count flag is set, output only the count and exit
+	if count {
+		fmt.Printf("%d issues\n", len(issues))
+		// Still allow export if specified
+		if exportOpt != "" {
+			kinds := parseExports(exportOpt)
+
+			// Add timestamp to filename: [cluster-name]-k8s-report-YYYYMMDD-HHMMSS
+			now := time.Now()
+			timestamp := fmt.Sprintf("%s-%s",
+				now.Format("20060102"), // YYYYMMDD
+				now.Format("150405"))   // HHMMSS
+
+			// Build base filename with optional cluster name prefix
+			var base string
+			if clusterName != "" {
+				// Sanitize cluster name for filename (remove invalid characters)
+				sanitized := sanitizeClusterName(clusterName)
+				base = fmt.Sprintf("%s-k8s-report-%s", sanitized, timestamp)
+			} else {
+				base = fmt.Sprintf("k8s-report-%s", timestamp)
+			}
+
+			if err := report.WriteAll(outdir, base, issues, sum, kinds); err != nil {
+				log.Fatalf("export failed: %v", err)
+			}
+		}
+		// Keep program running if metrics server is enabled
+		if enableMetrics {
+			fmt.Println("\nMetrics server is running. Press Ctrl+C to stop.")
+			select {} // Block forever to keep metrics server running
+		}
+		// Exit immediately when count flag is used (unless metrics are enabled)
+		return
 	}
 
 	// Console output
