@@ -107,7 +107,11 @@ func ScanPods(client *kubernetes.Clientset, namespaces []string, restartThreshol
 	}
 
 	wg.Wait()
-	return issues, nil
+
+	// Deduplicate issues: keep only the highest priority issue per pod
+	deduplicatedIssues := deduplicateIssues(issues)
+
+	return deduplicatedIssues, nil
 }
 
 // processPod processes a single pod and returns its issues
@@ -152,6 +156,96 @@ func getMaxRestartCount(pod v1.Pod) int32 {
 		}
 	}
 	return maxCount
+}
+
+// getSeverityPriority returns a numeric priority for severity (higher = more important)
+func getSeverityPriority(severity string) int {
+	switch severity {
+	case "critical":
+		return 4
+	case "high":
+		return 3
+	case "medium":
+		return 2
+	case "low":
+		return 1
+	default:
+		return 0
+	}
+}
+
+// getReasonPriority returns a numeric priority for reason specificity (higher = more specific)
+// This helps prioritize specific errors (like CrashLoopBackOff) over generic ones (like HighRestartCount)
+func getReasonPriority(reason string) int {
+	// Specific error reasons have higher priority
+	specificReasons := map[string]int{
+		"ImagePullBackOff": 10,
+		"ErrImagePull":     10,
+		"CrashLoopBackOff": 9,
+		"OOMKilled":        8,
+		"Evicted":          7,
+		"Pending":          6,
+	}
+	if priority, ok := specificReasons[reason]; ok {
+		return priority
+	}
+	// HighRestartCount is generic, so lower priority
+	if reason == "HighRestartCount" {
+		return 1
+	}
+	// Other reasons default to medium priority
+	return 5
+}
+
+// deduplicateIssues keeps only the highest priority issue per pod
+// Priority is determined by: severity (critical > high > medium > low) > reason specificity
+func deduplicateIssues(issues []types.Issue) []types.Issue {
+	if len(issues) == 0 {
+		return issues
+	}
+
+	// Map to store the best issue for each pod (key: namespace/name)
+	podIssues := make(map[string]types.Issue)
+
+	for _, issue := range issues {
+		key := issue.Namespace + "/" + issue.Name
+		existing, exists := podIssues[key]
+
+		if !exists {
+			// First issue for this pod
+			podIssues[key] = issue
+			continue
+		}
+
+		// Compare priorities
+		existingSeverityPriority := getSeverityPriority(existing.Severity)
+		newSeverityPriority := getSeverityPriority(issue.Severity)
+
+		// If new issue has higher severity, replace
+		if newSeverityPriority > existingSeverityPriority {
+			podIssues[key] = issue
+			continue
+		}
+
+		// If same severity, compare reason specificity
+		if newSeverityPriority == existingSeverityPriority {
+			existingReasonPriority := getReasonPriority(existing.Reason)
+			newReasonPriority := getReasonPriority(issue.Reason)
+
+			// If new issue has more specific reason, replace
+			if newReasonPriority > existingReasonPriority {
+				podIssues[key] = issue
+			}
+		}
+	}
+
+	// Convert map back to slice
+	result := make([]types.Issue, 0, len(podIssues))
+	for _, issue := range podIssues {
+		result = append(result, issue)
+	}
+
+	return result
 }
 
 // createIssue creates an Issue struct with common fields

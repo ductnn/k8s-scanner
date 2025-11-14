@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"github.com/ductnn/k8s-scanner/pkg/types"
 
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/klog/v2"
 )
 
 func printUsage() {
@@ -126,6 +128,14 @@ func main() {
 
 	flag.Parse()
 
+	// Suppress Kubernetes client logs when using --count flag
+	if count {
+		// Redirect klog output to discard to suppress verbose client logs
+		klog.SetOutput(io.Discard)
+		// Also suppress stderr for klog
+		klog.LogToStderr(false)
+	}
+
 	// Initialize and start metrics server if enabled
 	if enableMetrics {
 		metrics.Init()
@@ -203,7 +213,9 @@ func main() {
 
 	// If count flag is set, output only the count and exit immediately
 	if count {
-		fmt.Printf("%d\n", len(issues))
+		// Output only the number to stdout (no newline issues, just the number)
+		fmt.Print(len(issues))
+		fmt.Println() // Add newline after the number
 		return
 	}
 
